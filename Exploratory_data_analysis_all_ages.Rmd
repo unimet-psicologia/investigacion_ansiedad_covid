@@ -1,0 +1,483 @@
+---
+title: "Exploratory Data Analysis"
+author: "Yarfraz Nazuddeen"
+date: "17/2/2022"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# Packages and data 
+
+```{r, warning = FALSE}
+library(dplyr)
+library(readr)
+library(stringr)
+library(visdat)
+library(psych)
+library(ggplot2)
+library(patchwork)
+```
+
+```{r}
+df_ori <- read_delim("data/dataset_ie_ansiedad_ccs_vzla_202105.csv", 
+                 delim = ";", escape_double = FALSE, trim_ws = TRUE) # original copy
+
+df1 <- df_ori # working copy for data scanning
+
+```
+
+# Data Cleaning
+
+## Initial data status 
+
+Extensive column names were edited
+
+```{r}
+df1 <- df1 %>% 
+  rename(
+    c_r = ciudad_de_residencia,
+    mun_r = municipio_de_residencia,
+    fam_ven_nucleo = tiene_algun_familiar_en_venezuela__nucleo_mama_papa_o_hermanos,
+    prin_gasto_fam = seleccione_el_principal_gasto_que_posee_su_familia,
+    perc_fut_pais = como_percibe_el_futuro_en_el_pais,
+    emigrar = desea_emigrar,
+    perc_sit_act_pais = como_percibe_la_situacion_actual_del_pais,
+    close_person_covid = alguna_persona_cercana_amigoa_o_allegado_ha_sufrido_de_covid19,
+    n_close_person_covid_no_hosp = de_ser_afirmativa_su_respuesta_ingrese_la_cantidad_de_allegados_que_contrajeron_covid19_pero_no_fueron_hospitalizados,
+    n_close_person_covid_yes_hosp = de_ser_afirmativa_su_respuesta_ingrese_la_cantidad_de_personas_cercanas_que_han_sido_hospitalizados_por_covid19,
+    n_close_person_covid_deaths = de_ser_afirmativa_su_respuesta_ingrese_la_cantidad_de_personas_cercanas_que_han_muerto_de_covid19,
+    fam_covid = algun_integrante_de_su_familia_ha_sufrido_de_covid19,
+    n_fam_covid_no_hosp = de_ser_afirmativa_su_respuesta_ingrese_la_cantidad_de_familiares_que_contrajeron_covid19_pero_no_fueron_hospitalizados,
+    n_fam_covid_yes_hosp = de_ser_afirmativa_su_respuesta_ingrese_la_cantidad_de_familiares_que_han_sido_hospitalizados_por_covid19,
+    n_fam_covid_deaths = de_ser_afirmativa_su_respuesta_ingrese_la_cantidad_de_familiares_que_han_muerto_por_covid19,
+    graffar_escala_total = graffar_escala_puntuacion_total,
+    monthly_fam_income = cual_es_el_ingreso_aproximado_mensual_de_la_familia
+  )
+```
+
+## Data formating
+
+Columns of Emotional Inteligence and Anxiety factors were coded as numbers.
+
+```{r}
+df1[, 2:7] <- lapply(df1[, 2:7], function(x) str_replace(x, ",", "."))
+  #correct formatting of numbers
+
+df1[, 2:7] <- lapply(df1[, 2:7], as.numeric)
+  #conversion to numeric
+```
+
+## Categories exploration
+
+Categories listed by columns. From them, only "sexo" and "c_r" are relevant to the study.
+In "sexo" corresponding to "sex" one category is rare.
+In "c_r" (city of residence) there are many names of places. Some within city of research (Caracas), a few outside.
+```{r}
+categories <- df1 %>% 
+  select(sexo, c_r)
+
+categories_list <- lapply(categories, unique)
+
+print(categories_list)
+```
+
+### Sexo
+
+This col has one record called "helicóptero de combate" which is not a sex category.
+This subject was eliminated for security (Someone played a joke)
+```{r}
+
+df1 <- df1 %>% 
+  filter(sexo != "helicóptero de combate")
+```
+
+### c_r
+
+First, I counted the number of subjects by category. Then in selected the places that didn't belong the city of research. After that, I removed those subjects from the data. For the rest of categories, I replaced its value by "Caracas".
+
+```{r, include=TRUE}
+count_c_r <- df1 %>% 
+  select(c_r) %>% 
+  group_by(c_r) %>% 
+  count()
+
+print(count_c_r)
+  # 5 subjects don't belong to  Caracas, they'll be eliminated
+```
+
+Elimination of 5 subjects for living outside the city of research
+```{r}
+
+df1 <- df1 %>% 
+  filter(c_r != c("Puerto Ordaz")) %>% 
+  filter(c_r != c("guarenas")) %>% 
+  filter(c_r != c("Guarenas")) %>% 
+  filter(c_r != c("Guatire")) %>% 
+  filter(c_r != c("Ciudad Charallave"))
+  # 5 records were excluded 
+
+```
+
+All 'ciudad de residencia' records have been converted to "Caracas"
+```{r}
+df1$c_r <- if_else(df1$c_r == "Caracas", df1$c_r, "Caracas")
+  
+```
+
+
+## Missing values
+
+  8,1% of the data is missing
+
+```{r}
+vis_miss(df1)
+```
+
+* There are 20 records that are missing in the Anxiety factors. Those records were excluded
+
+```{r, include=TRUE}
+sum(is.na(df1$factor_ansiedad_rasgo))
+```
+```{r}
+df1 <- df1 %>% 
+  filter(!(is.na(factor_ansiedad_rasgo)))
+
+```
+
+
+* Those who responded **"No"** to the question *"alguna_persona_cercana_amigoa_o_allegado_ha_sufrido_de_covid19"* and *"algun_integrante_de_su_familia_ha_sufrido_de_covid19"* had NA as input in the columns related to number of covid 19 cases they know from family or close relatives. Those records were replaced by 0
+
+```{r}
+df1[which(df1$close_person_covid == "No"), 20:22] <- 0
+
+df1[which(df1$fam_covid == "No"), 24:26] <- 0
+```
+
+* The column related to monthly family income was a voluntary text response, so those NA are not important to the study
+
+## Graffar Scale
+
+I organized every value into it's category 
+
+```{r}
+df1 <- df1 %>%
+  mutate(graffar_estratos = if_else(graffar_escala_total >= 4 & graffar_escala_total<= 6, "I", 
+                             if_else(graffar_escala_total >= 7 & graffar_escala_total <= 9, "II", 
+                                     if_else(graffar_escala_total >= 10 & graffar_escala_total <= 12, "III", 
+                                             if_else(graffar_escala_total >= 13 & graffar_escala_total <= 16, "IV", "V")
+                                                     )
+                                             )
+                                     ) 
+                              
+         )
+```
+
+## Transformation to factor
+
+
+```{r}
+df1 <- df1 %>% 
+  mutate(mun_r = as.factor(mun_r),
+         nivel_educativo = as.factor(nivel_educativo), 
+         estado_civil = as.factor(estado_civil), 
+         sexo = as.factor(sexo), 
+         close_person_covid = as.factor(close_person_covid),
+         fam_covid = as.factor(fam_covid), 
+         graffar_estratos = as.factor(graffar_estratos))
+```
+ 
+
+
+# Explaratory data analysis
+
+
+
+## Edad
+
+Summary statistics 
+```{r}
+describe(df1$edad)
+
+
+```
+
+Histogram and boxplot
+
+```{r}
+hist_edad <- ggplot(df1, aes(edad)) + 
+  geom_histogram(binwidth=1, fill="#619b8a", color ="black")
+
+box_edad <- ggplot(df1, aes(y =edad, x = 0)) + 
+  geom_boxplot(fill="#619b8a", color ="black", width = 0.3) +
+  xlim(-0.4,0.4)
+  
+hist_edad | box_edad
+```
+
+## Sexo
+
+Here I showed the distribution of sex and its age variabilities 
+```{r}
+df1 %>% 
+  select(sexo, edad) %>% 
+  group_by(sexo) %>% 
+  summarise(count = n(), 
+            mean = round(mean(edad), 2),
+            sd = round(sd(edad), 2),
+            min = min(edad),
+            max = max(edad))
+```
+
+## Covid related variables
+
+This data contains 6 variables related to Covid.
+
+### Close persons that sufferd COVID 19
+
+In this code chunk I showed the summary of people that know a close person that: got covid, the number of them that were either hospitalized or not, and how many of them died.
+
+```{r}
+df1 %>% 
+  select(close_person_covid, n_close_person_covid_no_hosp, n_close_person_covid_yes_hosp, n_close_person_covid_deaths) %>% 
+  group_by(close_person_covid) %>% 
+  summarise(n = n(),
+            perc = round(n()/nrow(df1) * 100, 2),
+            no_hosp = sum(n_close_person_covid_no_hosp), 
+            yes_hosp = sum(n_close_person_covid_yes_hosp), 
+            deaths = sum(n_close_person_covid_deaths))
+```
+
+Histogram and boxplots to see the distribution of this variables and their outliers. There is a huge range in the close person that were not hospitalized. We're not sure why. Also there are many numbers that seems odd and unlikely.
+
+```{r}
+hist_close_person_no_hosp <- ggplot(df1, aes(n_close_person_covid_no_hosp)) + 
+  geom_histogram(binwidth=5, fill="#2267ca", color ="black")
+
+hist_close_person_yes_hosp <- ggplot(df1, aes(n_close_person_covid_yes_hosp)) + 
+  geom_histogram(binwidth=5, fill="#fdc24b", color ="black")
+
+hist_close_person_deaths <- ggplot(df1, aes(n_close_person_covid_deaths)) + 
+  geom_histogram(binwidth=1, fill="#e56b07", color ="black")
+
+box_close_person_no_hosp <- ggplot(df1, aes(y =n_close_person_covid_no_hosp)) +
+  geom_boxplot(fill="#2267ca", color ="black", width = 0.3) +
+  xlim(-0.4,0.4)
+
+box_close_person_yes_hosp <- ggplot(df1, aes(y= n_close_person_covid_yes_hosp)) +
+  geom_boxplot(fill="#fdc24b", color ="black", width = 0.3) + 
+  xlim(-0.4,0.4)
+
+box_close_person_deaths <- ggplot(df1, aes(y = n_close_person_covid_deaths)) + 
+  geom_boxplot(fill="#e56b07", color ="black", width = 0.3) +
+  xlim(-0.4,0.4)
+
+close_person_covid_graph <- (hist_close_person_no_hosp | hist_close_person_yes_hosp | hist_close_person_deaths) /
+  (box_close_person_no_hosp | box_close_person_yes_hosp | box_close_person_deaths)
+
+print(close_person_covid_graph)
+```
+
+### Family relatives that suffered COVID 19 
+
+```{r}
+df1 %>% 
+  select(fam_covid, n_fam_covid_no_hosp, n_fam_covid_yes_hosp, n_fam_covid_deaths) %>% 
+  group_by(fam_covid) %>% 
+  summarise(n = n(),
+            perc = round(n() / nrow(df1) * 100, 2),
+            no_hosp = sum(n_fam_covid_no_hosp), 
+            yes_hosp = sum(n_fam_covid_yes_hosp), 
+            deaths = sum(n_fam_covid_deaths))
+```
+
+Histograms and Boxplots
+
+```{r}
+hist_fam_covid_no_hosp <- ggplot(df1, aes(n_fam_covid_no_hosp)) + 
+  geom_histogram(binwidth=5, fill="#2267ca", color ="black")
+
+hist_fam_covid_yes_hosp <- ggplot(df1, aes(n_fam_covid_yes_hosp)) + 
+  geom_histogram(binwidth=1, fill="#fdc24b", color ="black")
+
+hist_fam_covid_deaths <- ggplot(df1, aes(n_fam_covid_deaths)) + 
+  geom_histogram(binwidth=1, fill="#e56b07", color ="black")
+
+box_fam_covid_no_hosp <- ggplot(df1, aes(y =n_fam_covid_no_hosp)) +
+  geom_boxplot(fill="#2267ca", color ="black", width = 0.3) +
+  xlim(-0.4,0.4) 
+
+box_fam_covid_yes_hosp <- ggplot(df1, aes(y= n_fam_covid_yes_hosp)) +
+  geom_boxplot(fill="#fdc24b", color ="black", width = 0.3) +
+  xlim(-0.4,0.4)
+
+box_fam_covid_deaths <- ggplot(df1, aes(y = n_fam_covid_deaths)) + 
+  geom_boxplot(fill="#e56b07", color ="black", width = 0.3) +
+  xlim(-0.4,0.4)
+
+
+fam_covid_graphs <- (hist_fam_covid_no_hosp | hist_fam_covid_yes_hosp | hist_fam_covid_deaths) /
+  (box_fam_covid_no_hosp | box_fam_covid_yes_hosp | box_fam_covid_deaths)
+
+print(fam_covid_graphs)
+```
+
+## Graffar Scale
+
+Distribution:
+
+```{r}
+df1 %>% 
+  select(graffar_estratos) %>% 
+  group_by(graffar_estratos) %>% 
+  summarise(n = n(),
+            perc = round(n() / nrow(df1) * 100, 2))
+```
+
+
+
+
+
+# Outliers Analysis
+
+Some variables thresholds are not useful due to the exacerbated range of their data
+
+```{r}
+
+#function to calculate outlier thresholds 
+outliers_range <- function(x) {
+  q1 <- quantile(x, 0.25, names = FALSE)
+  q3 <- quantile(x, 0.75, names = FALSE)
+  
+  iqr <- q3 - q1
+  
+  low <- (q1 - 1.5) * iqr
+  high <- (q3 + 1.5) * iqr
+  
+  print(paste(low,"to",high))
+
+}
+
+df1 %>% 
+  select(n_close_person_covid_no_hosp, n_close_person_covid_yes_hosp, n_close_person_covid_deaths,
+         n_fam_covid_no_hosp, n_fam_covid_yes_hosp, n_fam_covid_deaths) %>% 
+  summarise(close_no_hosp = outliers_range(n_close_person_covid_no_hosp), 
+            close_yes_hosp = outliers_range(n_close_person_covid_yes_hosp), 
+            close_deaths = outliers_range(n_close_person_covid_deaths),
+            fam_no_hosp = outliers_range(n_fam_covid_no_hosp),
+            fam_yes_hosp = outliers_range(n_fam_covid_yes_hosp),
+            fam_deaths = outliers_range(n_fam_covid_deaths)
+            )
+
+```
+
+
+
+# Anxiety and Covid Model significance testing
+
+I run some regression analysis with the Covid and Anxiety variables to see if there was a significant association between them. Outliers in the Covid variables were removed. 
+
+## Close person with Covid
+
+Outliers limits were taken arbitrarily by looking at the boxplots of every variable until no more outliers were shown 
+
+```{r}
+anx_close_person_df <- df1 %>% 
+  select(factor_ansiedad_rasgo, factor_ansiedad_estado, factor_ansiedad_emociones_adaptativas, 
+         close_person_covid, n_close_person_covid_no_hosp, n_close_person_covid_yes_hosp, n_close_person_covid_deaths) %>% 
+  filter(n_close_person_covid_no_hosp < 20) %>% 
+  filter(n_close_person_covid_yes_hosp <= 5) %>% 
+  filter(n_close_person_covid_deaths <= 5)
+```
+
+### "Ansiedad Rasgo" analysis
+
+Here seems that knowing that some close person have covid is significant to diminish the value of "Ansiedad rasgo". The number of close people you know with covid may be irrelevant in this set of data. 
+
+```{r}
+ans_rasgo_model_all <- "factor_ansiedad_rasgo ~ close_person_covid + n_close_person_covid_no_hosp + n_close_person_covid_yes_hosp + n_close_person_covid_deaths"
+
+ans_rasgo_model_all_run <- lm(ans_rasgo_model_all, anx_close_person_df)
+
+summary(ans_rasgo_model_all_run) 
+```
+
+### "Ansiedad Estado" analysis
+
+No covid related variable was significant
+
+```{r}
+ans_estado_model_all <- "factor_ansiedad_estado ~ close_person_covid + n_close_person_covid_no_hosp + n_close_person_covid_yes_hosp + n_close_person_covid_deaths"
+
+ans_estado_model_all_run <- lm(ans_estado_model_all, anx_close_person_df)
+
+summary(ans_estado_model_all_run) 
+```
+
+
+### "Ansiedad Emociones Adaptativas" analysis
+
+No covid related variable was significant
+
+```{r}
+ans_emo_adap_model_all <- "factor_ansiedad_emociones_adaptativas ~ close_person_covid + n_close_person_covid_no_hosp + n_close_person_covid_yes_hosp + n_close_person_covid_deaths"
+
+ans_emo_adap_model_all_run <- lm(ans_emo_adap_model_all, anx_close_person_df)
+
+summary(ans_emo_adap_model_all_run) 
+```
+
+
+
+## Family with Covid
+
+Since family covid cases that were not hospitalized had more outliers than the other set of variables, I only removed those subjects that count more than 10 cases 
+
+```{r}
+ans_fam_covid_df <- df1 %>% 
+  select(factor_ansiedad_rasgo, factor_ansiedad_estado, factor_ansiedad_emociones_adaptativas, 
+         fam_covid, n_fam_covid_no_hosp, n_fam_covid_yes_hosp, n_fam_covid_deaths) %>% 
+  filter(n_fam_covid_no_hosp <= 10)
+```
+
+
+### "Ansiedad rasgo" analysis
+
+Just the intercept and n_fam_covid_deahts seem significant
+
+```{r}
+ans_rasgo_fam_covid_model_all <- "factor_ansiedad_rasgo ~ fam_covid + n_fam_covid_no_hosp + n_fam_covid_yes_hosp + n_fam_covid_deaths"
+
+ans_rasgo_fam_covid_model_all_run <- lm(ans_rasgo_fam_covid_model_all, ans_fam_covid_df)
+
+summary(ans_rasgo_fam_covid_model_all_run)  
+```
+
+
+### "Ansiedad Estado" analysis
+
+No covid related variable was significant
+
+```{r}
+ans_estado_fam_covid_model_all <- "factor_ansiedad_estado ~ fam_covid + n_fam_covid_no_hosp + n_fam_covid_yes_hosp + n_fam_covid_deaths"
+
+ans_estado_fam_covid_model_all_run <- lm(ans_estado_fam_covid_model_all, ans_fam_covid_df)
+
+summary(ans_estado_fam_covid_model_all_run) 
+```
+
+
+
+### "Ansiedad Emociones Adaptativas" analysis
+
+no covid related variable was significant
+
+```{r}
+ans_emo_adap_fam_covid_model_all <- "factor_ansiedad_emociones_adaptativas ~ fam_covid + n_fam_covid_no_hosp + n_fam_covid_yes_hosp + n_fam_covid_deaths"
+
+ans_emo_adap_fam_covid_model_all_run <- lm(ans_emo_adap_fam_covid_model_all, ans_fam_covid_df)
+
+summary(ans_emo_adap_fam_covid_model_all_run)
+```
+
+
